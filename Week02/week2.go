@@ -7,7 +7,7 @@ import (
 )
 
 // dao 层中是否应该 Wrap 这个 error抛给上层？  分情况：（1）如果查询 无关紧要的逻辑可以内部现场处理 （2）若是增 删 改错误级别 就需要wrap error到上层了
-//sql.ErrNoRows 不需要抛异常  因为它不影响任何逻辑
+//sql.ErrNoRows 不需要抛异常  因为它不影响任何逻辑   直接返回记录数为空判断即可
 type Dao struct {
 	......
 }
