@@ -1,52 +1,54 @@
 package main
-
 import (
-	"context"
+	"errors"
 	"fmt"
-	"net/http"
+	"go-project-layout/server/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
+	"context"
+
+	"golang.org/x/sync/errgroup"
 )
-//同时关闭
-func serverApp(stop <- chan struct{}) error  {
-	return serve("127.0.0.1:8080",http.DefaultServeMux,stop)
-}
-
-func serverDebug(stop <- chan struct{}) error {
-	return serve("127.0.0.1:8001",http.DefaultServeMux,stop)
-}
-
-func serve(addr string,handler http.Handler,stop <- chan struct{}) error {
-	s := http.Server{
-		Addr: addr,
-		Handler: handler,
-	}
-	go func() {
-		<-stop
-		fmt.Println("I am closed addr=%v",addr)
-		s.Shutdown(context.Background())
-	}()
-	return s.ListenAndServe()
-}
-
-func main()  {
-	done := make(chan error,2)
-	stop := make(chan struct{})//有一个有问题关闭所有的都关闭
-	go func() {
-		 serverDebug(stop)
-	}()
-	go func() {
-		serverApp(stop)
-	}()
-	close(stop)
-	time.Sleep(time.Second * 10)
-	var stopped bool
-	for i:=0;i<cap(done);i++ {
-		if err :=<-done;err != nil{
-			fmt.Println("error: %v",err)
+//基于 errgroup 实现一个 http server 的启动和关闭 ，以及 linux signal 信号的注册和处理，要保证能够一个退出，全部注销退出。
+func main() {
+	g, ctx := errgroup.WithContext(context.Background())
+	svr := http.NewServer()
+	// http server
+	g.Go(func() error {
+		fmt.Println("http")
+		go func() {
+			<-ctx.Done()
+			fmt.Println("http ctx done")
+			svr.Shutdown(context.TODO())
+		}()
+		return svr.Start()
+	})
+	// signal
+	g.Go(func() error {
+		exitSignals := []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT} // SIGTERM is POSIX specific
+		sig := make(chan os.Signal, len(exitSignals))
+		signal.Notify(sig, exitSignals...)
+		for {
+			fmt.Println("signal")
+			select {
+			case <-ctx.Done():
+				fmt.Println("signal ctx done")
+				return ctx.Err()
+			case <-sig: // do something
+				return nil
+			}
 		}
-		if !stopped {
-			stopped = true
-			close(stop)
-		}
-	}
+	})
+	// inject error
+	g.Go(func() error {
+		fmt.Println("inject")
+		time.Sleep(time.Second)
+		fmt.Println("inject finish")
+		return errors.New("inject error")
+	})
+
+	err := g.Wait() // first error return
+	fmt.Println(err)
 }
